@@ -1,0 +1,15 @@
+{
+  "name": "ha-button-binder",
+  "version": "0.1.0",
+  "description": "Home Assistant app for learning button events and binding them to actions.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {}
+}

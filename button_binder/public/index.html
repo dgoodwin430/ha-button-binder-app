@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <base href="./">
+    <title>Button Binder</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>Button Binder</h1>
+          <p id="statusLine">Starting...</p>
+        </div>
+        <div class="status-pill" id="statusPill">
+          <span class="status-dot"></span>
+          <span id="statusText">Offline</span>
+        </div>
+      </header>
+
+      <section class="toolbar" aria-label="Interface tools">
+        <label>
+          Name
+          <input id="newInterfaceName" type="text" value="Zemismart 4 Button Remote">
+        </label>
+        <label class="count-input">
+          Buttons
+          <input id="newButtonCount" type="number" min="1" max="12" value="4">
+        </label>
+        <button id="addInterfaceButton" type="button">Add Interface</button>
+        <button id="refreshButton" class="secondary" type="button">Refresh</button>
+      </section>
+
+      <section id="notice" class="notice" hidden></section>
+
+      <section id="interfaces" class="interfaces" aria-label="Button interfaces"></section>
+
+      <section class="activity">
+        <div class="section-heading">
+          <h2>Recent Events</h2>
+          <span id="eventCount">0</span>
+        </div>
+        <ol id="recentEvents" class="event-list"></ol>
+      </section>
+    </main>
+
+    <datalist id="entityList"></datalist>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
