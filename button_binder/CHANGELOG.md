@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- Explicitly set the Supervisor API role for token injection.
+
 ## 0.1.2
 
 - Enabled Supervisor API access so Home Assistant reliably injects `SUPERVISOR_TOKEN`.
