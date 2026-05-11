@@ -1,6 +1,6 @@
 {
   "name": "ha-button-binder",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Home Assistant app for learning button events and binding them to actions.",
   "private": true,
   "type": "module",

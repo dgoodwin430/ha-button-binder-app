@@ -250,6 +250,7 @@ function renderFollowers() {
 function renderFollower(follower) {
   const last = follower.lastSyncedAt ? `Last: ${formatTime(follower.lastSyncedAt)}` : "Last: never";
   const command = follower.lastFollowerCommand ? `Command: ${follower.lastFollowerCommand}` : "";
+  const skipped = follower.lastSkipReason ? `Skipped: ${follower.lastSkipReason}` : "";
   const error = follower.lastError ? `<strong>${escapeHtml(follower.lastError)}</strong>` : "";
 
   return `
@@ -265,6 +266,10 @@ function renderFollower(follower) {
       <label>
         Follower entity
         <input data-follower-target list="entityList" type="text" value="${escapeAttr(follower.follower_entity_id || "")}">
+      </label>
+      <label>
+        Group on
+        <select data-follower-group-on>${renderGroupOnModeOptions(follower.group_on_mode)}</select>
       </label>
       <label class="check-label">
         <input data-follower-enabled type="checkbox" ${follower.enabled ? "checked" : ""}>
@@ -282,10 +287,20 @@ function renderFollower(follower) {
       <div class="binding-meta">
         <span>${escapeHtml(last)}</span>
         ${command ? `<span>${escapeHtml(command)}</span>` : ""}
+        ${skipped ? `<span>${escapeHtml(skipped)}</span>` : ""}
         ${error}
       </div>
     </div>
   `;
+}
+
+function renderGroupOnModeOptions(selectedMode = "binder") {
+  const modes = [
+    ["binder", "After app command"],
+    ["always", "Always"],
+    ["never", "Never"],
+  ];
+  return modes.map(([value, label]) => option(value, label, value === selectedMode)).join("");
 }
 
 async function clearEvents() {
@@ -482,6 +497,7 @@ function followerPayload(element) {
     name: element.querySelector("[data-follower-name]").value,
     enabled: element.querySelector("[data-follower-enabled]").checked,
     invert: element.querySelector("[data-follower-invert]").checked,
+    group_on_mode: element.querySelector("[data-follower-group-on]").value,
     source_entity_id: element.querySelector("[data-follower-source]").value.trim(),
     follower_entity_id: element.querySelector("[data-follower-target]").value.trim(),
   };

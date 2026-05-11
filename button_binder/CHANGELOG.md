@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Added group-safe state follower behavior to prevent partial group state changes from turning an entire group on.
+- Added a **Group on** follower option with `After app command`, `Always`, and `Never` modes.
+
 ## 0.2.0
 
 - Added state followers for mirroring source entity state to another switch, light, or helper entity.

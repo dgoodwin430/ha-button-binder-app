@@ -77,6 +77,10 @@ Steps:
 
 Use **Invert** if the follower should be on when the source is off.
 
+For grouped source entities, **Group on** defaults to **After app command**. That means Button Binder will not turn the follower on just because one member of a light group turned on. It will only mirror the group turning on when Button Binder recently commanded that source entity. This prevents follower switches from accidentally turning an entire group on.
+
+Use **Always** only when the follower entity is a safe indicator/helper and turning it on will not actuate the same group. Use **Never** when the follower should only mirror the off state.
+
 ## Data
 
 Mappings are stored in:

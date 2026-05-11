@@ -16,6 +16,7 @@ const HA_TOKEN = await readHomeAssistantToken();
 const DEFAULT_EVENT_TYPES = ["zha_event"];
 const MAX_RECENT_EVENTS = 30;
 const RECENT_EVENT_BROADCAST_INTERVAL_MS = 750;
+const RECENT_COMMAND_WINDOW_MS = 8000;
 
 let store = createDefaultStore();
 let addonOptions = { event_types: DEFAULT_EVENT_TYPES };
@@ -23,6 +24,7 @@ let learning = null;
 let recentEvents = [];
 let recentEventBroadcastTimer = null;
 let clientSockets = new Set();
+let recentlyCommandedEntities = new Map();
 
 const ha = {
   authed: false,
@@ -457,6 +459,7 @@ function createStateFollower(name) {
     enabled: true,
     source_entity_id: "",
     follower_entity_id: "",
+    group_on_mode: "binder",
     invert: false,
     createdAt: new Date().toISOString(),
     lastSyncedAt: null,
@@ -495,9 +498,14 @@ function migrateStore(value) {
     return createDefaultStore();
   }
 
+  const followers = Array.isArray(value.followers) ? value.followers.map((follower) => ({
+    group_on_mode: "binder",
+    ...follower,
+  })) : [];
+
   return {
     version: 2,
-    followers: Array.isArray(value.followers) ? value.followers : [],
+    followers,
     interfaces: Array.isArray(value.interfaces) ? value.interfaces : [],
   };
 }
@@ -624,13 +632,18 @@ async function subscribeToWatchedEvents() {
 }
 
 async function handleHomeAssistantEvent(event) {
+  let followersChanged = false;
   if (event?.event_type === "state_changed") {
     cacheEntityState(event.data?.new_state);
-    await syncStateFollowersForEvent(event);
+    followersChanged = await syncStateFollowersForEvent(event);
   }
 
   const visibleEvent = ha.watchedEventTypes.includes(event?.event_type);
   if (!visibleEvent) {
+    if (followersChanged) {
+      await saveStore();
+      broadcast({ type: "data", store, recentEvents });
+    }
     return;
   }
 
@@ -659,7 +672,7 @@ async function handleHomeAssistantEvent(event) {
     }
   }
 
-  if (matches.length > 0) {
+  if (matches.length > 0 || followersChanged) {
     await saveStore();
     broadcast({ type: "data", store, recentEvents });
   } else {
@@ -670,7 +683,7 @@ async function handleHomeAssistantEvent(event) {
 async function syncStateFollowersForEvent(event) {
   const sourceEntityId = cleanString(event?.data?.entity_id);
   if (!sourceEntityId) {
-    return;
+    return false;
   }
 
   const newState = event.data?.new_state?.state;
@@ -678,7 +691,7 @@ async function syncStateFollowersForEvent(event) {
   const newBinaryState = stateToBinary(newState);
   const oldBinaryState = stateToBinary(oldState);
   if (newBinaryState === null || newBinaryState === oldBinaryState) {
-    return;
+    return false;
   }
 
   const followers = store.followers.filter((follower) => (
@@ -688,14 +701,30 @@ async function syncStateFollowersForEvent(event) {
     && follower.follower_entity_id !== sourceEntityId
   ));
 
+  const sourceWasRecentlyCommanded = wasEntityCommandedRecently(sourceEntityId);
+  let changed = false;
   for (const follower of followers) {
     try {
+      if (shouldSkipFollowerOnForGroup(follower, event.data?.new_state, newBinaryState, sourceWasRecentlyCommanded)) {
+        recordFollowerSkip(follower, "Group source turned on without a recent Button Binder command");
+        changed = true;
+        continue;
+      }
+
       await setFollowerState(follower, newBinaryState, "state_changed", newState);
+      changed = true;
     } catch (error) {
       follower.lastError = error.message;
+      changed = true;
       console.error(`State follower failed for ${follower.name}: ${error.message}`);
     }
   }
+
+  if (sourceWasRecentlyCommanded) {
+    recentlyCommandedEntities.delete(sourceEntityId);
+  }
+
+  return changed;
 }
 
 async function syncStateFollowerFromCurrentState(follower, source) {
@@ -717,7 +746,40 @@ async function syncStateFollowerFromCurrentState(follower, source) {
     throw new Error(`Source state '${state?.state ?? "unknown"}' cannot be mirrored`);
   }
 
+  if (shouldSkipFollowerOnForGroup(follower, state, binaryState)) {
+    recordFollowerSkip(follower, "Group source is on, but group-on behavior is protected");
+    return;
+  }
+
   await setFollowerState(follower, binaryState, source, state.state);
+}
+
+function shouldSkipFollowerOnForGroup(
+  follower,
+  sourceState,
+  sourceBinaryState,
+  sourceWasRecentlyCommanded = wasEntityCommandedRecently(follower.source_entity_id),
+) {
+  if (!sourceBinaryState || !isGroupLikeState(sourceState, follower.source_entity_id)) {
+    return false;
+  }
+
+  const mode = follower.group_on_mode || "binder";
+  if (mode === "always") {
+    return false;
+  }
+
+  if (mode === "never") {
+    return true;
+  }
+
+  return !sourceWasRecentlyCommanded;
+}
+
+function recordFollowerSkip(follower, reason) {
+  follower.lastSkippedAt = new Date().toISOString();
+  follower.lastSkipReason = reason;
+  delete follower.lastError;
 }
 
 async function setFollowerState(follower, sourceBinaryState, source, sourceState) {
@@ -849,10 +911,31 @@ async function callBindingAction(binding, source) {
     command.target = removeEmpty(action.target);
   }
 
+  markCommandedEntities(action);
   await sendHaCommand(command);
   binding.lastTriggeredAt = new Date().toISOString();
   binding.lastTriggerSource = source;
   delete binding.lastError;
+}
+
+function markCommandedEntities(action) {
+  const entityIds = normalizeEntityIdArray(action?.target?.entity_id);
+  for (const entityId of entityIds) {
+    recentlyCommandedEntities.set(entityId, Date.now());
+  }
+}
+
+function wasEntityCommandedRecently(entityId) {
+  const lastCommandedAt = recentlyCommandedEntities.get(entityId);
+  if (!lastCommandedAt) {
+    return false;
+  }
+
+  const recent = Date.now() - lastCommandedAt <= RECENT_COMMAND_WINDOW_MS;
+  if (!recent) {
+    recentlyCommandedEntities.delete(entityId);
+  }
+  return recent;
 }
 
 async function getHaStates() {
@@ -1006,6 +1089,11 @@ function updateStateFollower(follower, patch) {
     follower.follower_entity_id = cleanString(patch.follower_entity_id);
   }
 
+  if (patch.group_on_mode !== undefined) {
+    const mode = cleanString(patch.group_on_mode);
+    follower.group_on_mode = ["always", "binder", "never"].includes(mode) ? mode : "binder";
+  }
+
   if (patch.invert !== undefined) {
     follower.invert = Boolean(patch.invert);
   }
@@ -1029,6 +1117,15 @@ function normalizeListOrString(value) {
     return value.map(cleanString).filter(Boolean);
   }
   return cleanString(value);
+}
+
+function normalizeEntityIdArray(value) {
+  if (Array.isArray(value)) {
+    return value.map(cleanString).filter(Boolean);
+  }
+
+  const cleaned = cleanString(value);
+  return cleaned ? [cleaned] : [];
 }
 
 function normalizeEventTypes(eventTypes) {
@@ -1114,6 +1211,14 @@ function stateToBinary(state) {
   }
 
   return null;
+}
+
+function isGroupLikeState(state, entityId) {
+  if (cleanString(entityId).startsWith("group.")) {
+    return true;
+  }
+
+  return Array.isArray(state?.attributes?.entity_id) && state.attributes.entity_id.length > 0;
 }
 
 function uid() {
