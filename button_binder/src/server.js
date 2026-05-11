@@ -13,13 +13,15 @@ const STORE_PATH = path.join(DATA_DIR, "button-maps.json");
 const OPTIONS_PATH = process.env.BUTTON_BINDER_OPTIONS_PATH || "/data/options.json";
 const HA_WS_URL = process.env.HA_WS_URL || "ws://supervisor/core/websocket";
 const HA_TOKEN = await readHomeAssistantToken();
-const DEFAULT_EVENT_TYPES = ["zha_event", "state_changed"];
+const DEFAULT_EVENT_TYPES = ["zha_event"];
 const MAX_RECENT_EVENTS = 30;
+const RECENT_EVENT_BROADCAST_INTERVAL_MS = 750;
 
 let store = createDefaultStore();
 let addonOptions = { event_types: DEFAULT_EVENT_TYPES };
 let learning = null;
 let recentEvents = [];
+let recentEventBroadcastTimer = null;
 let clientSockets = new Set();
 
 const ha = {
@@ -214,6 +216,14 @@ app.post("/api/learn/stop", (_req, res) => {
   learning = null;
   broadcast({ type: "learning", learning });
   res.json({ learning });
+});
+
+app.post("/api/events/clear", (_req, res) => {
+  recentEvents = [];
+  clearTimeout(recentEventBroadcastTimer);
+  recentEventBroadcastTimer = null;
+  broadcast({ type: "event", recentEvents });
+  res.json({ recentEvents });
 });
 
 app.post("/api/bindings/:bindingId/test", async (req, res, next) => {
@@ -536,7 +546,7 @@ async function handleHomeAssistantEvent(event) {
     await saveStore();
     broadcast({ type: "data", store, recentEvents });
   } else {
-    broadcast({ type: "event", recentEvents });
+    scheduleRecentEventsBroadcast();
   }
 }
 
@@ -728,6 +738,17 @@ function recordRecentEvent(event, signature) {
     signature,
   });
   recentEvents = recentEvents.slice(0, MAX_RECENT_EVENTS);
+}
+
+function scheduleRecentEventsBroadcast() {
+  if (recentEventBroadcastTimer) {
+    return;
+  }
+
+  recentEventBroadcastTimer = setTimeout(() => {
+    recentEventBroadcastTimer = null;
+    broadcast({ type: "event", recentEvents });
+  }, RECENT_EVENT_BROADCAST_INTERVAL_MS);
 }
 
 function expireLearningSession() {

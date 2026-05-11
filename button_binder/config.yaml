@@ -1,5 +1,5 @@
 name: Button Binder
-version: "0.1.4"
+version: "0.1.5"
 slug: button_binder
 description: GUI for learning Home Assistant button events and assigning actions
 url: https://github.com/dgoodwin430/ha-button-binder-app
@@ -21,7 +21,6 @@ hassio_role: default
 options:
   event_types:
     - zha_event
-    - state_changed
 schema:
   event_types:
     - str

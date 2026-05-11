@@ -12,14 +12,13 @@
 
 ## Event Types
 
-The app watches these event types by default:
+The app watches this event type by default:
 
 - `zha_event`
-- `state_changed`
 
 For ZHA remotes, Home Assistant usually emits `zha_event` with fields like `device_id`, `endpoint_id`, and `command`.
 
-For Zigbee2MQTT through Home Assistant entities, button actions often appear as `state_changed` events on an action sensor or event entity.
+For Zigbee2MQTT through Home Assistant entities, button actions often appear as `state_changed` events on an action sensor or event entity. Add `state_changed` only if your remote does not show up while learning with `zha_event`.
 
 You can add more event types in the app configuration:
 

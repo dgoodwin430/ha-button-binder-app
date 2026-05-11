@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5
+
+- Prevent live event updates from re-rendering the binding editor.
+- Added pause and clear controls for the Recent Events panel.
+- Changed the default watched event type to `zha_event` only to avoid `state_changed` noise.
+
 ## 0.1.4
 
 - Start Node through `with-contenv` so Home Assistant-provided environment variables are available.

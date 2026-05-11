@@ -1,17 +1,20 @@
 const state = {
   data: { store: { interfaces: [] }, recentEvents: [], learning: null },
   entities: [],
+  eventsPaused: false,
   services: {},
   status: { connected: false, lastError: null, watchedEventTypes: [] },
 };
 
 const els = {
   addInterfaceButton: document.querySelector("#addInterfaceButton"),
+  clearEventsButton: document.querySelector("#clearEventsButton"),
   eventCount: document.querySelector("#eventCount"),
   interfaces: document.querySelector("#interfaces"),
   newButtonCount: document.querySelector("#newButtonCount"),
   newInterfaceName: document.querySelector("#newInterfaceName"),
   notice: document.querySelector("#notice"),
+  pauseEventsButton: document.querySelector("#pauseEventsButton"),
   recentEvents: document.querySelector("#recentEvents"),
   refreshButton: document.querySelector("#refreshButton"),
   statusLine: document.querySelector("#statusLine"),
@@ -21,6 +24,8 @@ const els = {
 };
 
 els.addInterfaceButton.addEventListener("click", addInterface);
+els.clearEventsButton.addEventListener("click", clearEvents);
+els.pauseEventsButton.addEventListener("click", toggleEventsPaused);
 els.refreshButton.addEventListener("click", refreshAll);
 
 connectEvents();
@@ -208,7 +213,9 @@ function renderBinding(binding) {
 
 function renderEvents() {
   const events = state.data.recentEvents || [];
-  els.eventCount.textContent = String(events.length);
+  els.eventCount.textContent = state.eventsPaused ? `${events.length} paused` : String(events.length);
+  els.pauseEventsButton.textContent = state.eventsPaused ? "Resume" : "Pause";
+  els.pauseEventsButton.classList.toggle("active", state.eventsPaused);
   if (events.length === 0) {
     els.recentEvents.innerHTML = '<li><span>No events captured</span><span></span><code></code></li>';
     return;
@@ -221,6 +228,17 @@ function renderEvents() {
       <code title="${escapeAttr(JSON.stringify(event.signature.match))}">${escapeHtml(shortJson(event.signature.match))}</code>
     </li>
   `).join("");
+}
+
+async function clearEvents() {
+  state.data.recentEvents = [];
+  renderEvents();
+  await request("api/events/clear", { method: "POST" });
+}
+
+function toggleEventsPaused() {
+  state.eventsPaused = !state.eventsPaused;
+  renderEvents();
 }
 
 function renderEntityList() {
@@ -404,14 +422,23 @@ function connectEvents() {
 
   ws.addEventListener("message", async (event) => {
     const payload = JSON.parse(event.data);
+    let renderAll = false;
+    let renderEventList = false;
+    let renderStatusOnly = false;
+
     if (payload.store) {
       state.data.store = payload.store;
+      renderAll = true;
     }
     if (payload.learning !== undefined) {
       state.data.learning = payload.learning;
+      renderAll = true;
     }
     if (payload.recentEvents) {
-      state.data.recentEvents = payload.recentEvents;
+      if (!(state.eventsPaused && payload.type === "event")) {
+        state.data.recentEvents = payload.recentEvents;
+        renderEventList = true;
+      }
     }
     if (payload.connected !== undefined) {
       state.status.connected = payload.connected;
@@ -422,8 +449,16 @@ function connectEvents() {
       state.status.lastClose = payload.lastClose;
       state.status.lastConnectedAt = payload.lastConnectedAt;
       state.status.lastMessageAt = payload.lastMessageAt;
+      renderStatusOnly = true;
     }
-    render();
+
+    if (renderAll) {
+      render();
+    } else if (renderEventList) {
+      renderEvents();
+    } else if (renderStatusOnly) {
+      renderStatus();
+    }
   });
 
   ws.addEventListener("close", () => {

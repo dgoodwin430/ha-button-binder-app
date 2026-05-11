@@ -54,6 +54,12 @@ button.secondary {
   color: var(--text);
 }
 
+button.secondary.active {
+  border-color: var(--amber);
+  background: #fff8e8;
+  color: #67440e;
+}
+
 button.danger {
   border-color: var(--red);
   background: #fff;
@@ -346,6 +352,12 @@ code {
 .section-heading span {
   color: var(--muted);
   font-weight: 900;
+}
+
+.event-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .event-list {
