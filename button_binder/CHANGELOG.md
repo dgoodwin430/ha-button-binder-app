@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- Enabled Supervisor API access so Home Assistant reliably injects `SUPERVISOR_TOKEN`.
+
 ## 0.1.1
 
 - Added clearer Home Assistant connection diagnostics in the UI and logs.

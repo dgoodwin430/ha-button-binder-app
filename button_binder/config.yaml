@@ -1,5 +1,5 @@
 name: Button Binder
-version: "0.1.1"
+version: "0.1.2"
 slug: button_binder
 description: GUI for learning Home Assistant button events and assigning actions
 url: https://github.com/dgoodwin430/ha-button-binder-app
@@ -16,6 +16,7 @@ ingress: true
 ingress_port: 8099
 panel_icon: mdi:gesture-tap-button
 homeassistant_api: true
+hassio_api: true
 options:
   event_types:
     - zha_event
