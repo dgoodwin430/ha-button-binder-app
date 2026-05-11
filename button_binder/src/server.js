@@ -36,6 +36,7 @@ const ha = {
   phase: HA_TOKEN ? "starting" : "missing_token",
   reconnectTimer: null,
   services: null,
+  stateByEntity: new Map(),
   states: [],
   subscriptions: new Map(),
   watchedEventTypes: [],
@@ -226,6 +227,95 @@ app.post("/api/events/clear", (_req, res) => {
   res.json({ recentEvents });
 });
 
+app.post("/api/followers", async (req, res, next) => {
+  try {
+    const follower = createStateFollower(cleanString(req.body.name) || "State follower");
+    updateStateFollower(follower, req.body);
+    store.followers.push(follower);
+    await saveStore();
+    broadcast({ type: "data", store });
+    res.status(201).json(follower);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/followers/:followerId", async (req, res, next) => {
+  try {
+    const follower = findStateFollower(req.params.followerId);
+    if (!follower) {
+      res.status(404).json({ error: "State follower not found" });
+      return;
+    }
+
+    updateStateFollower(follower, req.body);
+    await saveStore();
+    broadcast({ type: "data", store });
+    res.json(follower);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/followers/:followerId", async (req, res, next) => {
+  try {
+    const index = store.followers.findIndex((follower) => follower.id === req.params.followerId);
+    if (index === -1) {
+      res.status(404).json({ error: "State follower not found" });
+      return;
+    }
+
+    store.followers.splice(index, 1);
+    await saveStore();
+    broadcast({ type: "data", store });
+    res.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/followers/:followerId/sync", async (req, res, next) => {
+  try {
+    const follower = findStateFollower(req.params.followerId);
+    if (!follower) {
+      res.status(404).json({ error: "State follower not found" });
+      return;
+    }
+
+    await syncStateFollowerFromCurrentState(follower, "manual");
+    await saveStore();
+    broadcast({ type: "data", store });
+    res.json(follower);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/followers/sync", async (_req, res, next) => {
+  try {
+    const results = [];
+    for (const follower of store.followers) {
+      if (!follower.enabled) {
+        continue;
+      }
+
+      try {
+        await syncStateFollowerFromCurrentState(follower, "manual");
+        results.push({ id: follower.id, ok: true });
+      } catch (error) {
+        follower.lastError = error.message;
+        results.push({ id: follower.id, ok: false, error: error.message });
+      }
+    }
+
+    await saveStore();
+    broadcast({ type: "data", store });
+    res.json({ results });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/bindings/:bindingId/test", async (req, res, next) => {
   try {
     const found = findBinding(req.params.bindingId);
@@ -299,7 +389,8 @@ server.listen(PORT, "0.0.0.0", () => {
 
 function createDefaultStore() {
   return {
-    version: 1,
+    version: 2,
+    followers: [],
     interfaces: [],
   };
 }
@@ -359,6 +450,19 @@ function createBinding(name) {
   };
 }
 
+function createStateFollower(name) {
+  return {
+    id: uid(),
+    name,
+    enabled: true,
+    source_entity_id: "",
+    follower_entity_id: "",
+    invert: false,
+    createdAt: new Date().toISOString(),
+    lastSyncedAt: null,
+  };
+}
+
 async function loadOptions() {
   try {
     const raw = await fs.readFile(OPTIONS_PATH, "utf8");
@@ -392,7 +496,8 @@ function migrateStore(value) {
   }
 
   return {
-    version: 1,
+    version: 2,
+    followers: Array.isArray(value.followers) ? value.followers : [],
     interfaces: Array.isArray(value.interfaces) ? value.interfaces : [],
   };
 }
@@ -503,7 +608,9 @@ async function subscribeToWatchedEvents() {
   ha.watchedEventTypes = normalizeEventTypes(addonOptions.event_types);
   ha.subscriptions.clear();
 
-  for (const eventType of ha.watchedEventTypes) {
+  const subscriptionEventTypes = [...new Set([...ha.watchedEventTypes, "state_changed"])];
+
+  for (const eventType of subscriptionEventTypes) {
     try {
       const id = ha.nextId++;
       await sendHaCommandWithId(id, { type: "subscribe_events", event_type: eventType });
@@ -517,6 +624,16 @@ async function subscribeToWatchedEvents() {
 }
 
 async function handleHomeAssistantEvent(event) {
+  if (event?.event_type === "state_changed") {
+    cacheEntityState(event.data?.new_state);
+    await syncStateFollowersForEvent(event);
+  }
+
+  const visibleEvent = ha.watchedEventTypes.includes(event?.event_type);
+  if (!visibleEvent) {
+    return;
+  }
+
   const signature = signatureFromEvent(event);
   recordRecentEvent(event, signature);
 
@@ -548,6 +665,84 @@ async function handleHomeAssistantEvent(event) {
   } else {
     scheduleRecentEventsBroadcast();
   }
+}
+
+async function syncStateFollowersForEvent(event) {
+  const sourceEntityId = cleanString(event?.data?.entity_id);
+  if (!sourceEntityId) {
+    return;
+  }
+
+  const newState = event.data?.new_state?.state;
+  const oldState = event.data?.old_state?.state;
+  const newBinaryState = stateToBinary(newState);
+  const oldBinaryState = stateToBinary(oldState);
+  if (newBinaryState === null || newBinaryState === oldBinaryState) {
+    return;
+  }
+
+  const followers = store.followers.filter((follower) => (
+    follower.enabled
+    && follower.source_entity_id === sourceEntityId
+    && follower.follower_entity_id
+    && follower.follower_entity_id !== sourceEntityId
+  ));
+
+  for (const follower of followers) {
+    try {
+      await setFollowerState(follower, newBinaryState, "state_changed", newState);
+    } catch (error) {
+      follower.lastError = error.message;
+      console.error(`State follower failed for ${follower.name}: ${error.message}`);
+    }
+  }
+}
+
+async function syncStateFollowerFromCurrentState(follower, source) {
+  if (!follower.enabled) {
+    throw new Error("State follower is disabled");
+  }
+
+  if (!follower.source_entity_id || !follower.follower_entity_id) {
+    throw new Error("Source and follower entities are required");
+  }
+
+  if (follower.source_entity_id === follower.follower_entity_id) {
+    throw new Error("Source and follower entities must be different");
+  }
+
+  const state = await getEntityState(follower.source_entity_id);
+  const binaryState = stateToBinary(state?.state);
+  if (binaryState === null) {
+    throw new Error(`Source state '${state?.state ?? "unknown"}' cannot be mirrored`);
+  }
+
+  await setFollowerState(follower, binaryState, source, state.state);
+}
+
+async function setFollowerState(follower, sourceBinaryState, source, sourceState) {
+  const followerEntityId = cleanString(follower.follower_entity_id);
+  const domain = followerEntityId.split(".")[0];
+  const desiredOn = follower.invert ? !sourceBinaryState : sourceBinaryState;
+  const service = desiredOn ? "turn_on" : "turn_off";
+
+  if (!domain || !followerEntityId.includes(".")) {
+    throw new Error("Follower entity must look like switch.name or light.name");
+  }
+
+  await sendHaCommand({
+    type: "call_service",
+    domain,
+    service,
+    target: { entity_id: followerEntityId },
+    service_data: {},
+  });
+
+  follower.lastSyncedAt = new Date().toISOString();
+  follower.lastSyncSource = source;
+  follower.lastSourceState = sourceState;
+  follower.lastFollowerCommand = `${domain}.${service}`;
+  delete follower.lastError;
 }
 
 function findMatchingBindings(event) {
@@ -672,7 +867,25 @@ async function getHaStates() {
     name: state.attributes?.friendly_name || state.entity_id,
     state: state.state,
   }));
+  for (const state of states) {
+    cacheEntityState(state);
+  }
   return ha.states;
+}
+
+async function getEntityState(entityId) {
+  if (ha.stateByEntity.has(entityId)) {
+    return ha.stateByEntity.get(entityId);
+  }
+
+  await getHaStates();
+  return ha.stateByEntity.get(entityId);
+}
+
+function cacheEntityState(state) {
+  if (state?.entity_id) {
+    ha.stateByEntity.set(state.entity_id, state);
+  }
 }
 
 async function getHaServices() {
@@ -776,6 +989,28 @@ function updateBinding(binding, patch) {
   }
 }
 
+function updateStateFollower(follower, patch) {
+  if (patch.name !== undefined) {
+    follower.name = cleanString(patch.name) || follower.name;
+  }
+
+  if (patch.enabled !== undefined) {
+    follower.enabled = Boolean(patch.enabled);
+  }
+
+  if (patch.source_entity_id !== undefined) {
+    follower.source_entity_id = cleanString(patch.source_entity_id);
+  }
+
+  if (patch.follower_entity_id !== undefined) {
+    follower.follower_entity_id = cleanString(patch.follower_entity_id);
+  }
+
+  if (patch.invert !== undefined) {
+    follower.invert = Boolean(patch.invert);
+  }
+}
+
 function normalizeAction(action = {}) {
   return {
     domain: cleanString(action.domain),
@@ -829,6 +1064,10 @@ function findBinding(bindingId) {
   return null;
 }
 
+function findStateFollower(followerId) {
+  return store.followers.find((follower) => follower.id === followerId);
+}
+
 function broadcastStatus() {
   broadcast({
     type: "status",
@@ -862,6 +1101,19 @@ function clampNumber(value, min, max, fallback) {
     return fallback;
   }
   return Math.min(max, Math.max(min, Math.round(number)));
+}
+
+function stateToBinary(state) {
+  const value = cleanString(state).toLowerCase();
+  if (["on", "open", "opening", "playing", "home", "heat", "cool"].includes(value)) {
+    return true;
+  }
+
+  if (["off", "closed", "closing", "idle", "paused", "standby", "not_home"].includes(value)) {
+    return false;
+  }
+
+  return null;
 }
 
 function uid() {

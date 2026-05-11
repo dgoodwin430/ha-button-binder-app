@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0
+
+- Added state followers for mirroring source entity state to another switch, light, or helper entity.
+- State followers listen to `state_changed` internally without flooding Recent Events.
+- Added manual follower sync controls.
+
 ## 0.1.5
 
 - Prevent live event updates from re-rendering the binding editor.

@@ -326,7 +326,8 @@ code {
   color: var(--amber);
 }
 
-.activity {
+.activity,
+.followers {
   margin-top: 18px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -358,6 +359,37 @@ code {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.follower-list {
+  display: grid;
+  gap: 1px;
+  background: var(--line);
+}
+
+.follower-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(190px, 1.2fr) minmax(190px, 1.2fr) auto auto auto;
+  gap: 10px;
+  align-items: end;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.follower-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.follower-row .binding-meta {
+  grid-column: 1 / -1;
+}
+
+.empty.compact {
+  min-height: 74px;
+  border: 0;
+  border-radius: 0;
+  background: #fff;
 }
 
 .event-list {
@@ -415,8 +447,15 @@ code {
   .button-header,
   .binding-title,
   .action-grid,
+  .follower-row,
   .event-list li {
     grid-template-columns: 1fr;
+  }
+
+  .follower-actions,
+  .event-tools {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .topbar {

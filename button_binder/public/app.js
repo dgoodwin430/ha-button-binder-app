@@ -1,5 +1,5 @@
 const state = {
-  data: { store: { interfaces: [] }, recentEvents: [], learning: null },
+  data: { store: { followers: [], interfaces: [] }, recentEvents: [], learning: null },
   entities: [],
   eventsPaused: false,
   services: {},
@@ -7,9 +7,11 @@ const state = {
 };
 
 const els = {
+  addFollowerButton: document.querySelector("#addFollowerButton"),
   addInterfaceButton: document.querySelector("#addInterfaceButton"),
   clearEventsButton: document.querySelector("#clearEventsButton"),
   eventCount: document.querySelector("#eventCount"),
+  followers: document.querySelector("#followers"),
   interfaces: document.querySelector("#interfaces"),
   newButtonCount: document.querySelector("#newButtonCount"),
   newInterfaceName: document.querySelector("#newInterfaceName"),
@@ -20,13 +22,16 @@ const els = {
   statusLine: document.querySelector("#statusLine"),
   statusPill: document.querySelector("#statusPill"),
   statusText: document.querySelector("#statusText"),
+  syncFollowersButton: document.querySelector("#syncFollowersButton"),
   entityList: document.querySelector("#entityList"),
 };
 
+els.addFollowerButton.addEventListener("click", addFollower);
 els.addInterfaceButton.addEventListener("click", addInterface);
 els.clearEventsButton.addEventListener("click", clearEvents);
 els.pauseEventsButton.addEventListener("click", toggleEventsPaused);
 els.refreshButton.addEventListener("click", refreshAll);
+els.syncFollowersButton.addEventListener("click", syncFollowers);
 
 connectEvents();
 await refreshAll();
@@ -79,6 +84,7 @@ async function addInterface() {
 function render() {
   renderStatus();
   renderInterfaces();
+  renderFollowers();
   renderEvents();
 }
 
@@ -230,6 +236,58 @@ function renderEvents() {
   `).join("");
 }
 
+function renderFollowers() {
+  const followers = state.data.store.followers || [];
+  if (followers.length === 0) {
+    els.followers.innerHTML = '<div class="empty compact">No state followers yet</div>';
+    return;
+  }
+
+  els.followers.innerHTML = followers.map(renderFollower).join("");
+  bindFollowerEvents();
+}
+
+function renderFollower(follower) {
+  const last = follower.lastSyncedAt ? `Last: ${formatTime(follower.lastSyncedAt)}` : "Last: never";
+  const command = follower.lastFollowerCommand ? `Command: ${follower.lastFollowerCommand}` : "";
+  const error = follower.lastError ? `<strong>${escapeHtml(follower.lastError)}</strong>` : "";
+
+  return `
+    <div class="follower-row" data-follower-id="${escapeAttr(follower.id)}">
+      <label>
+        Name
+        <input data-follower-name type="text" value="${escapeAttr(follower.name)}">
+      </label>
+      <label>
+        Source entity
+        <input data-follower-source list="entityList" type="text" value="${escapeAttr(follower.source_entity_id || "")}">
+      </label>
+      <label>
+        Follower entity
+        <input data-follower-target list="entityList" type="text" value="${escapeAttr(follower.follower_entity_id || "")}">
+      </label>
+      <label class="check-label">
+        <input data-follower-enabled type="checkbox" ${follower.enabled ? "checked" : ""}>
+        Enabled
+      </label>
+      <label class="check-label">
+        <input data-follower-invert type="checkbox" ${follower.invert ? "checked" : ""}>
+        Invert
+      </label>
+      <div class="follower-actions">
+        <button data-save-follower class="small" type="button">Save</button>
+        <button data-sync-follower class="secondary small" type="button">Sync</button>
+        <button data-delete-follower class="danger small" type="button">Delete</button>
+      </div>
+      <div class="binding-meta">
+        <span>${escapeHtml(last)}</span>
+        ${command ? `<span>${escapeHtml(command)}</span>` : ""}
+        ${error}
+      </div>
+    </div>
+  `;
+}
+
 async function clearEvents() {
   state.data.recentEvents = [];
   renderEvents();
@@ -323,6 +381,20 @@ function bindInterfaceEvents() {
   });
 }
 
+function bindFollowerEvents() {
+  document.querySelectorAll("[data-save-follower]").forEach((button) => {
+    button.addEventListener("click", () => saveFollower(button.closest("[data-follower-id]")));
+  });
+
+  document.querySelectorAll("[data-sync-follower]").forEach((button) => {
+    button.addEventListener("click", () => syncFollower(button.closest("[data-follower-id]")));
+  });
+
+  document.querySelectorAll("[data-delete-follower]").forEach((button) => {
+    button.addEventListener("click", () => deleteFollower(button.closest("[data-follower-id]")));
+  });
+}
+
 async function saveInterface(element) {
   const interfaceId = element.dataset.interfaceId;
   const name = element.querySelector("[data-interface-name]").value;
@@ -362,6 +434,57 @@ async function addBinding(element) {
   });
   await refreshData();
   render();
+}
+
+async function addFollower() {
+  await request("api/followers", {
+    method: "POST",
+    body: { name: "State follower" },
+  });
+  await refreshData();
+  render();
+}
+
+async function saveFollower(element) {
+  await request(`api/followers/${element.dataset.followerId}`, {
+    method: "PATCH",
+    body: followerPayload(element),
+  });
+  await refreshData();
+  render();
+}
+
+async function syncFollower(element) {
+  await saveFollower(element);
+  await request(`api/followers/${element.dataset.followerId}/sync`, { method: "POST" });
+  await refreshData();
+  render();
+}
+
+async function syncFollowers() {
+  await request("api/followers/sync", { method: "POST" });
+  await refreshData();
+  render();
+}
+
+async function deleteFollower(element) {
+  if (!confirm("Delete this state follower?")) {
+    return;
+  }
+
+  await request(`api/followers/${element.dataset.followerId}`, { method: "DELETE" });
+  await refreshData();
+  render();
+}
+
+function followerPayload(element) {
+  return {
+    name: element.querySelector("[data-follower-name]").value,
+    enabled: element.querySelector("[data-follower-enabled]").checked,
+    invert: element.querySelector("[data-follower-invert]").checked,
+    source_entity_id: element.querySelector("[data-follower-source]").value.trim(),
+    follower_entity_id: element.querySelector("[data-follower-target]").value.trim(),
+  };
 }
 
 async function saveBinding(element) {
