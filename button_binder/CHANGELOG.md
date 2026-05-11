@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- Added clearer Home Assistant connection diagnostics in the UI and logs.
+
 ## 0.1.0
 
 - Initial app scaffold.

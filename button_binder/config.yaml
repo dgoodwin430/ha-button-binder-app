@@ -1,5 +1,5 @@
 name: Button Binder
-version: "0.1.0"
+version: "0.1.1"
 slug: button_binder
 description: GUI for learning Home Assistant button events and assigning actions
 url: https://github.com/dgoodwin430/ha-button-binder-app

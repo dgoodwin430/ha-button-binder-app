@@ -25,9 +25,13 @@ let clientSockets = new Set();
 const ha = {
   authed: false,
   connected: false,
+  lastClose: null,
+  lastConnectedAt: null,
   lastError: null,
+  lastMessageAt: null,
   nextId: 1,
   pending: new Map(),
+  phase: HA_TOKEN ? "starting" : "missing_token",
   reconnectTimer: null,
   services: null,
   states: [],
@@ -47,7 +51,12 @@ app.get("/api/status", (_req, res) => {
   res.json({
     connected: ha.connected && ha.authed,
     learning,
+    lastClose: ha.lastClose,
+    lastConnectedAt: ha.lastConnectedAt,
     lastError: ha.lastError,
+    lastMessageAt: ha.lastMessageAt,
+    phase: ha.phase,
+    tokenPresent: Boolean(HA_TOKEN),
     watchedEventTypes: ha.watchedEventTypes,
   });
 });
@@ -361,11 +370,14 @@ async function saveStore() {
 function connectHomeAssistant() {
   if (!HA_TOKEN) {
     ha.lastError = "SUPERVISOR_TOKEN or HA_TOKEN is not set";
+    ha.phase = "missing_token";
     console.warn("Home Assistant token is not available. Running UI only.");
     return;
   }
 
   clearTimeout(ha.reconnectTimer);
+  ha.phase = "connecting";
+  ha.lastClose = null;
   ha.ws = new WebSocket(HA_WS_URL);
   ha.authed = false;
   ha.connected = false;
@@ -373,18 +385,29 @@ function connectHomeAssistant() {
 
   ha.ws.on("open", () => {
     ha.connected = true;
+    ha.lastConnectedAt = new Date().toISOString();
+    ha.phase = "authenticating";
+    console.log(`Connected to Home Assistant WebSocket proxy at ${HA_WS_URL}`);
+    broadcastStatus();
   });
 
   ha.ws.on("message", (data) => {
     void handleHomeAssistantMessage(data);
   });
 
-  ha.ws.on("close", () => {
-    resetHaConnection("WebSocket closed");
+  ha.ws.on("close", (code, reason) => {
+    const reasonText = reason?.toString() || "";
+    ha.lastClose = {
+      code,
+      reason: reasonText,
+      closedAt: new Date().toISOString(),
+    };
+    resetHaConnection(`WebSocket closed${code ? ` (${code})` : ""}${reasonText ? `: ${reasonText}` : ""}`);
     scheduleReconnect();
   });
 
   ha.ws.on("error", (error) => {
+    console.error(`Home Assistant WebSocket error: ${error.message}`);
     resetHaConnection(error.message);
   });
 }
@@ -397,12 +420,15 @@ async function handleHomeAssistantMessage(data) {
     return;
   }
 
+  ha.lastMessageAt = new Date().toISOString();
+
   if (message.type === "auth_required") {
     ha.ws?.send(JSON.stringify({ type: "auth", access_token: HA_TOKEN }));
     return;
   }
 
   if (message.type === "auth_invalid") {
+    console.error(`Home Assistant authentication failed: ${message.message || "Invalid token"}`);
     resetHaConnection(message.message || "Home Assistant authentication failed");
     return;
   }
@@ -410,7 +436,9 @@ async function handleHomeAssistantMessage(data) {
   if (message.type === "auth_ok") {
     ha.authed = true;
     ha.lastError = null;
+    ha.phase = "subscribing";
     await subscribeToWatchedEvents();
+    ha.phase = "ready";
     broadcastStatus();
     return;
   }
@@ -646,6 +674,7 @@ function resetHaConnection(errorMessage) {
   ha.authed = false;
   ha.connected = false;
   ha.lastError = errorMessage;
+  ha.phase = HA_TOKEN ? "offline" : "missing_token";
   for (const [id, pending] of ha.pending) {
     clearTimeout(pending.timeout);
     pending.reject(new Error(errorMessage));
@@ -660,7 +689,9 @@ function scheduleReconnect() {
   }
 
   clearTimeout(ha.reconnectTimer);
+  ha.phase = "reconnecting";
   ha.reconnectTimer = setTimeout(connectHomeAssistant, 5000);
+  broadcastStatus();
 }
 
 function recordRecentEvent(event, signature) {
@@ -756,7 +787,12 @@ function broadcastStatus() {
   broadcast({
     type: "status",
     connected: ha.connected && ha.authed,
+    lastClose: ha.lastClose,
+    lastConnectedAt: ha.lastConnectedAt,
     lastError: ha.lastError,
+    lastMessageAt: ha.lastMessageAt,
+    phase: ha.phase,
+    tokenPresent: Boolean(HA_TOKEN),
     watchedEventTypes: ha.watchedEventTypes,
   });
 }

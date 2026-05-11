@@ -85,8 +85,24 @@ function renderStatus() {
     ? state.status.watchedEventTypes.join(", ")
     : "no events";
   const learning = state.data.learning ? "Learning" : "Ready";
-  const detail = state.status.connected ? `Watching ${eventTypes}` : state.status.lastError || "Waiting for Home Assistant";
+  const detail = state.status.connected ? `Watching ${eventTypes}` : statusDetail();
   els.statusLine.textContent = `${learning} | ${detail}`;
+}
+
+function statusDetail() {
+  if (!state.status.tokenPresent) {
+    return "Missing SUPERVISOR_TOKEN";
+  }
+
+  if (state.status.lastError) {
+    return state.status.lastError;
+  }
+
+  if (state.status.phase) {
+    return `Connection phase: ${state.status.phase}`;
+  }
+
+  return "Waiting for Home Assistant";
 }
 
 function renderInterfaces() {
@@ -401,6 +417,11 @@ function connectEvents() {
       state.status.connected = payload.connected;
       state.status.lastError = payload.lastError;
       state.status.watchedEventTypes = payload.watchedEventTypes || [];
+      state.status.phase = payload.phase;
+      state.status.tokenPresent = payload.tokenPresent;
+      state.status.lastClose = payload.lastClose;
+      state.status.lastConnectedAt = payload.lastConnectedAt;
+      state.status.lastMessageAt = payload.lastMessageAt;
     }
     render();
   });
