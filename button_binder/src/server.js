@@ -12,7 +12,7 @@ const DATA_DIR = process.env.BUTTON_BINDER_DATA_DIR || "/data";
 const STORE_PATH = path.join(DATA_DIR, "button-maps.json");
 const OPTIONS_PATH = process.env.BUTTON_BINDER_OPTIONS_PATH || "/data/options.json";
 const HA_WS_URL = process.env.HA_WS_URL || "ws://supervisor/core/websocket";
-const HA_TOKEN = process.env.SUPERVISOR_TOKEN || process.env.HA_TOKEN || "";
+const HA_TOKEN = await readHomeAssistantToken();
 const DEFAULT_EVENT_TYPES = ["zha_event", "state_changed"];
 const MAX_RECENT_EVENTS = 30;
 
@@ -305,6 +305,31 @@ function createButtonInterface(name, buttonCount) {
       bindings: [createBinding("Single press")],
     })),
   };
+}
+
+async function readHomeAssistantToken() {
+  const envToken = process.env.SUPERVISOR_TOKEN || process.env.HA_TOKEN;
+  if (envToken) {
+    return envToken;
+  }
+
+  const tokenFiles = [
+    "/var/run/s6/container_environment/SUPERVISOR_TOKEN",
+    "/run/s6/container_environment/SUPERVISOR_TOKEN",
+  ];
+
+  for (const tokenFile of tokenFiles) {
+    try {
+      const token = (await fs.readFile(tokenFile, "utf8")).trim();
+      if (token) {
+        return token;
+      }
+    } catch {
+      // Try the next known s6 environment path.
+    }
+  }
+
+  return "";
 }
 
 function createBinding(name) {

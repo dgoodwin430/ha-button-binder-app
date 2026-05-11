@@ -17,7 +17,10 @@ RUN npm ci --omit=dev
 
 COPY src ./src
 COPY public ./public
+COPY run.sh /run.sh
+
+RUN chmod a+x /run.sh
 
 EXPOSE 8099
 
-CMD ["node", "src/server.js"]
+CMD ["/run.sh"]

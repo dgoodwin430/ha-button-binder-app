@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+
+- Start Node through `with-contenv` so Home Assistant-provided environment variables are available.
+
 ## 0.1.3
 
 - Explicitly set the Supervisor API role for token injection.
