@@ -66,7 +66,19 @@ When `light.kitchen` turns on, Button Binder calls `switch.turn_on` for `switch.
 
 Use this for a second 4-button switch that shows the state of each controlled entity.
 
-Steps:
+The common path is to configure the follower inside the button binding:
+
+1. Open the binding card for the button.
+2. Set the action entity.
+3. Enable **Sync indicator**.
+4. Set **Indicator entity** to the matching button or indicator entity on the other switch.
+5. Save the binding.
+
+The **Source** field defaults to the binding action entity. Change it only when the indicator should follow a different entity than the action target.
+
+The separate **State Followers** panel is still available as an advanced overview and for followers that are not tied to one button binding.
+
+Advanced steps:
 
 1. Open **State Followers**.
 2. Add one follower per button.

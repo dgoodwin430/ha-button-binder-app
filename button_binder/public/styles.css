@@ -314,6 +314,28 @@ code {
   grid-column: 1 / -1;
 }
 
+.indicator-panel {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d7e1ec;
+  border-radius: 8px;
+  background: #f8fbfd;
+  padding: 8px;
+}
+
+.indicator-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.indicator-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
 .binding-meta {
   display: flex;
   flex-wrap: wrap;
@@ -447,12 +469,14 @@ code {
   .button-header,
   .binding-title,
   .action-grid,
+  .indicator-grid,
   .follower-row,
   .event-list li {
     grid-template-columns: 1fr;
   }
 
   .follower-actions,
+  .indicator-title,
   .event-tools {
     align-items: stretch;
     flex-direction: column;

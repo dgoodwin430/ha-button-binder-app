@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- Added binding-linked indicator controls directly inside each button binding card.
+- Binding saves can now create or update a linked state follower.
+- Linked followers still appear in the global State Followers panel for advanced management.
+
 ## 0.2.1
 
 - Added group-safe state follower behavior to prevent partial group state changes from turning an entire group on.

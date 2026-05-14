@@ -165,6 +165,14 @@ function renderButton(button) {
 
 function renderBinding(binding) {
   const action = binding.action || {};
+  const linkedFollower = findLinkedFollower(binding.id);
+  const actionEntity = firstEntityId(action.target?.entity_id);
+  const followerSource = linkedFollower?.source_entity_id || actionEntity;
+  const followerEnabled = Boolean(linkedFollower?.enabled);
+  const followerLast = linkedFollower?.lastSyncedAt ? `Last: ${formatTime(linkedFollower.lastSyncedAt)}` : "Last: never";
+  const followerCommand = linkedFollower?.lastFollowerCommand ? `Command: ${linkedFollower.lastFollowerCommand}` : "";
+  const followerSkipped = linkedFollower?.lastSkipReason ? `Skipped: ${linkedFollower.lastSkipReason}` : "";
+  const followerError = linkedFollower?.lastError ? `<strong>${escapeHtml(linkedFollower.lastError)}</strong>` : "";
   const trigger = binding.trigger ? formatTrigger(binding.trigger) : "No trigger learned";
   const isLearning = state.data.learning?.bindingId === binding.id;
   const serviceData = JSON.stringify(action.service_data || {}, null, 2);
@@ -207,6 +215,39 @@ function renderBinding(binding) {
           Data
           <textarea data-service-data spellcheck="false">${escapeHtml(serviceData)}</textarea>
         </label>
+      </div>
+      <div class="indicator-panel" data-linked-follower-id="${escapeAttr(linkedFollower?.id || "")}">
+        <div class="indicator-title">
+          <label class="check-label">
+            <input data-linked-follower-enabled type="checkbox" ${followerEnabled ? "checked" : ""}>
+            Sync indicator
+          </label>
+          <button data-sync-linked-follower class="secondary small" type="button" ${linkedFollower && followerEnabled ? "" : "disabled"}>Sync</button>
+        </div>
+        <div class="indicator-grid">
+          <label>
+            Source
+            <input data-linked-follower-source list="entityList" type="text" value="${escapeAttr(followerSource || "")}">
+          </label>
+          <label>
+            Indicator entity
+            <input data-linked-follower-target list="entityList" type="text" value="${escapeAttr(linkedFollower?.follower_entity_id || "")}">
+          </label>
+          <label>
+            Group on
+            <select data-linked-follower-group-on>${renderGroupOnModeOptions(linkedFollower?.group_on_mode)}</select>
+          </label>
+          <label class="check-label">
+            <input data-linked-follower-invert type="checkbox" ${linkedFollower?.invert ? "checked" : ""}>
+            Invert
+          </label>
+        </div>
+        <div class="binding-meta">
+          <span>${escapeHtml(followerLast)}</span>
+          ${followerCommand ? `<span>${escapeHtml(followerCommand)}</span>` : ""}
+          ${followerSkipped ? `<span>${escapeHtml(followerSkipped)}</span>` : ""}
+          ${followerError}
+        </div>
       </div>
       <div class="binding-meta">
         <span>${escapeHtml(last)}</span>
@@ -252,6 +293,7 @@ function renderFollower(follower) {
   const command = follower.lastFollowerCommand ? `Command: ${follower.lastFollowerCommand}` : "";
   const skipped = follower.lastSkipReason ? `Skipped: ${follower.lastSkipReason}` : "";
   const error = follower.lastError ? `<strong>${escapeHtml(follower.lastError)}</strong>` : "";
+  const linked = follower.binding_id ? "Linked to binding" : "";
 
   return `
     <div class="follower-row" data-follower-id="${escapeAttr(follower.id)}">
@@ -285,6 +327,7 @@ function renderFollower(follower) {
         <button data-delete-follower class="danger small" type="button">Delete</button>
       </div>
       <div class="binding-meta">
+        ${linked ? `<span>${escapeHtml(linked)}</span>` : ""}
         <span>${escapeHtml(last)}</span>
         ${command ? `<span>${escapeHtml(command)}</span>` : ""}
         ${skipped ? `<span>${escapeHtml(skipped)}</span>` : ""}
@@ -295,12 +338,25 @@ function renderFollower(follower) {
 }
 
 function renderGroupOnModeOptions(selectedMode = "binder") {
+  selectedMode = selectedMode || "binder";
   const modes = [
     ["binder", "After app command"],
     ["always", "Always"],
     ["never", "Never"],
   ];
   return modes.map(([value, label]) => option(value, label, value === selectedMode)).join("");
+}
+
+function findLinkedFollower(bindingId) {
+  return (state.data.store.followers || []).find((follower) => follower.binding_id === bindingId);
+}
+
+function firstEntityId(value) {
+  if (Array.isArray(value)) {
+    return value[0] || "";
+  }
+
+  return typeof value === "string" ? value.trim() : "";
 }
 
 async function clearEvents() {
@@ -385,6 +441,10 @@ function bindInterfaceEvents() {
 
   document.querySelectorAll("[data-test]").forEach((button) => {
     button.addEventListener("click", () => testBinding(button.closest("[data-binding-id]")));
+  });
+
+  document.querySelectorAll("[data-sync-linked-follower]").forEach((button) => {
+    button.addEventListener("click", () => syncLinkedFollower(button.closest("[data-binding-id]")));
   });
 
   document.querySelectorAll("[data-action-domain]").forEach((select) => {
@@ -513,23 +573,85 @@ async function saveBinding(element) {
     return;
   }
 
+  const action = {
+    domain: element.querySelector("[data-action-domain]").value,
+    service: element.querySelector("[data-action-service]").value,
+    target: {
+      entity_id: element.querySelector("[data-action-entity]").value.trim(),
+    },
+    service_data: serviceData,
+  };
+  const followerPatch = linkedFollowerPayload(element, bindingId, action);
+  if (followerPatch.enabled && !followerPatch.follower_entity_id) {
+    showNotice("Choose an indicator entity before enabling Sync indicator.");
+    return;
+  }
+  if (followerPatch.enabled && !followerPatch.source_entity_id) {
+    showNotice("Choose a source entity before enabling Sync indicator.");
+    return;
+  }
+
   await request(`api/bindings/${bindingId}`, {
     method: "PATCH",
     body: {
       name: element.querySelector("[data-binding-name]").value,
       enabled: element.querySelector("[data-binding-enabled]").checked,
-      action: {
-        domain: element.querySelector("[data-action-domain]").value,
-        service: element.querySelector("[data-action-service]").value,
-        target: {
-          entity_id: element.querySelector("[data-action-entity]").value.trim(),
-        },
-        service_data: serviceData,
-      },
+      action,
     },
   });
+  await saveLinkedFollower(element, followerPatch);
   await refreshData();
   render();
+}
+
+async function saveLinkedFollower(element, followerPatch) {
+  const followerId = element.querySelector("[data-linked-follower-id]")?.dataset.linkedFollowerId;
+  const hasUsefulFields = followerPatch.enabled || followerPatch.follower_entity_id;
+
+  if (!followerId && !hasUsefulFields) {
+    return;
+  }
+
+  if (followerId) {
+    await request(`api/followers/${followerId}`, {
+      method: "PATCH",
+      body: followerPatch,
+    });
+    return;
+  }
+
+  await request("api/followers", {
+    method: "POST",
+    body: followerPatch,
+  });
+}
+
+async function syncLinkedFollower(element) {
+  await saveBinding(element);
+  const follower = findLinkedFollower(element.dataset.bindingId);
+  if (!follower) {
+    showNotice("Save the binding before syncing the indicator.");
+    return;
+  }
+
+  await request(`api/followers/${follower.id}/sync`, { method: "POST" });
+  await refreshData();
+  render();
+}
+
+function linkedFollowerPayload(element, bindingId, action) {
+  const source = element.querySelector("[data-linked-follower-source]").value.trim()
+    || firstEntityId(action.target?.entity_id);
+
+  return {
+    binding_id: bindingId,
+    name: `${element.querySelector("[data-binding-name]").value || "Binding"} indicator`,
+    enabled: element.querySelector("[data-linked-follower-enabled]").checked,
+    invert: element.querySelector("[data-linked-follower-invert]").checked,
+    group_on_mode: element.querySelector("[data-linked-follower-group-on]").value,
+    source_entity_id: source,
+    follower_entity_id: element.querySelector("[data-linked-follower-target]").value.trim(),
+  };
 }
 
 async function deleteBinding(element) {

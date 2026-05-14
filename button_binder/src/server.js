@@ -185,6 +185,7 @@ app.delete("/api/bindings/:bindingId", async (req, res, next) => {
     }
 
     found.button.bindings = found.button.bindings.filter((binding) => binding.id !== req.params.bindingId);
+    store.followers = store.followers.filter((follower) => follower.binding_id !== req.params.bindingId);
     if (learning?.bindingId === req.params.bindingId) {
       learning = null;
     }
@@ -456,6 +457,7 @@ function createStateFollower(name) {
   return {
     id: uid(),
     name,
+    binding_id: "",
     enabled: true,
     source_entity_id: "",
     follower_entity_id: "",
@@ -499,6 +501,7 @@ function migrateStore(value) {
   }
 
   const followers = Array.isArray(value.followers) ? value.followers.map((follower) => ({
+    binding_id: "",
     group_on_mode: "binder",
     ...follower,
   })) : [];
@@ -1075,6 +1078,10 @@ function updateBinding(binding, patch) {
 function updateStateFollower(follower, patch) {
   if (patch.name !== undefined) {
     follower.name = cleanString(patch.name) || follower.name;
+  }
+
+  if (patch.binding_id !== undefined) {
+    follower.binding_id = cleanString(patch.binding_id);
   }
 
   if (patch.enabled !== undefined) {
